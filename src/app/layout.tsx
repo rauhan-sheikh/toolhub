@@ -13,9 +13,12 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Toolhub Playlist Analyzer",
-  description:
-    "Calculate the total runtime of a YouTube playlist in a beautiful interface.",
+  title: {
+    default: "Rauhan's Toolhub",
+    template: "%s · Rauhan's Toolhub",
+  },
+  description: "A small collection of personal tools.",
+  robots: { index: false, follow: false },
 };
 
 export default function RootLayout({
@@ -28,7 +31,7 @@ export default function RootLayout({
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full">{children}</body>
     </html>
   );
 }

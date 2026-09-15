@@ -1,0 +1,90 @@
+# Rauhan's Toolhub — full stack.
+#
+# Only caddy publishes ports. metube and warp sit on an internal network and are
+# unreachable from the internet; the only way to queue a download is through the
+# authenticated app.
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN}
+    depends_on:
+      - web
+    networks: [edge]
+
+  web:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    expose:
+      - "3000"
+    depends_on:
+      - metube
+    networks: [edge, backend]
+
+  metube:
+    image: ghcr.io/alexta69/metube:latest
+    restart: unless-stopped
+    volumes:
+      - ./downloads:/downloads
+      - metube-state:/state
+    environment:
+      # MeTube starts as root and drops to PUID/PGID itself; setting `user:`
+      # directly would pre-empt that and break its own setup.
+      PUID: 1000
+      PGID: 1000
+      STATE_DIR: /state
+      # Route yt-dlp's traffic through Cloudflare WARP. YouTube blocks requests
+      # straight from cloud IP ranges (Oracle included) with "Sign in to confirm
+      # you're not a bot"; WARP egress is not treated that way.
+      YTDL_OPTIONS: '{"proxy":"socks5://warp:1080"}'
+    depends_on:
+      warp:
+        condition: service_healthy
+    networks: [backend]
+
+  warp:
+    image: caomingjun/warp
+    restart: unless-stopped
+    environment:
+      WARP_SLEEP: 2
+    # Required for the WireGuard tunnel the container brings up internally.
+    cap_add:
+      - MKNOD
+      - AUDIT_WRITE
+      - NET_ADMIN
+    device_cgroup_rules:
+      - "c 10:200 rwm"
+    sysctls:
+      net.ipv6.conf.all.disable_ipv6: 0
+      net.ipv4.conf.all.src_valid_mark: 1
+    volumes:
+      - warp-data:/var/lib/cloudflare-warp
+    healthcheck:
+      test: ["CMD", "sh", "-c", "curl -fs https://www.cloudflare.com/cdn-cgi/trace | grep -q 'warp=on'"]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 5
+    networks: [backend]
+
+networks:
+  edge:
+  # Not marked `internal: true` — WARP needs outbound internet. It simply
+  # publishes no ports, so metube and warp are unreachable from outside.
+  backend:
+
+volumes:
+  caddy-data:
+  caddy-config:
+  metube-state:
+  warp-data:

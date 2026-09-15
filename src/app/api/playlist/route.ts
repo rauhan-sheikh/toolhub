@@ -1,44 +1,16 @@
-import { google } from "googleapis";
 import { NextResponse } from "next/server";
-import parseDuration from "@/lib/youtube";
-
-const apiKey = process.env.YOUTUBE_API_KEY;
-
-const youtube = google.youtube({
-  version: "v3",
-  auth: apiKey,
-});
-
-function resolvePlaylistId(value: string) {
-  const trimmed = value.trim();
-  if (!trimmed) return "";
-
-  try {
-    const url = new URL(trimmed);
-    const listId = url.searchParams.get("list");
-    if (listId) return listId;
-  } catch {
-    // not a valid URL, fall back to regex extraction
-  }
-
-  const match = trimmed.match(/[?&]list=([A-Za-z0-9_-]+)/);
-  if (match?.[1]) return match[1];
-
-  return trimmed;
-}
+import { errorResponse, requireSession } from "@/lib/api";
+import { optionalEnv } from "@/lib/env";
+import { authedClient } from "@/lib/google";
+import { fetchPlaylistSummary, resolvePlaylistId } from "@/lib/youtube";
 
 export async function POST(req: Request) {
-  try {
-    if (!apiKey) {
-      return NextResponse.json(
-        { error: "Missing YOUTUBE_API_KEY environment variable" },
-        { status: 500 },
-      );
-    }
+  const auth = await requireSession();
+  if (!auth.ok) return auth.response;
 
+  try {
     const body = await req.json();
-    const rawInput = String(body?.playlistId ?? "");
-    const playlistId = resolvePlaylistId(rawInput);
+    const playlistId = resolvePlaylistId(String(body?.playlistId ?? ""));
     const skip = Number(body?.skip ?? 0);
 
     if (!playlistId) {
@@ -48,47 +20,24 @@ export async function POST(req: Request) {
       );
     }
 
-    let nextPageToken: string | undefined;
-    const videoIds: string[] = [];
-
-    do {
-      const response = await youtube.playlistItems.list({
-        part: ["contentDetails"],
+    // The user's OAuth credentials are what make private playlists readable; an
+    // API key can only ever see public ones. The key stays as a fallback for
+    // public playlists if OAuth is misconfigured.
+    const apiKey = optionalEnv("YOUTUBE_API_KEY");
+    let summary;
+    try {
+      summary = await fetchPlaylistSummary(
+        authedClient(auth.session.refreshToken),
         playlistId,
-        maxResults: 50,
-        pageToken: nextPageToken,
-      });
-
-      response.data.items?.forEach((item) => {
-        const id = item.contentDetails?.videoId;
-        if (id) videoIds.push(id);
-      });
-
-      nextPageToken = response.data.nextPageToken ?? undefined;
-    } while (nextPageToken);
-
-    const filteredIds = videoIds.slice(skip);
-    let totalSeconds = 0;
-
-    for (let i = 0; i < filteredIds.length; i += 50) {
-      const chunk = filteredIds.slice(i, i + 50);
-
-      const response = await youtube.videos.list({
-        part: ["contentDetails"],
-        id: chunk,
-      });
-
-      response.data.items?.forEach((item) => {
-        const duration = item.contentDetails?.duration || "";
-        totalSeconds += parseDuration(duration);
-      });
+        Number.isFinite(skip) && skip > 0 ? skip : 0,
+      );
+    } catch (oauthError) {
+      if (!apiKey) throw oauthError;
+      summary = await fetchPlaylistSummary(apiKey, playlistId, skip);
     }
 
-    return NextResponse.json({ totalSeconds });
+    return NextResponse.json(summary);
   } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "Something went wrong";
-
-    return NextResponse.json({ error: message }, { status: 500 });
+    return errorResponse(error);
   }
 }
