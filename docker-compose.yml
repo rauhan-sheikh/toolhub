@@ -37,8 +37,12 @@ services:
     environment:
       # MeTube starts as root and drops to PUID/PGID itself; setting `user:`
       # directly would pre-empt that and break its own setup.
-      PUID: 1000
-      PGID: 1000
+      #
+      # Don't assume 1000 is you. On Oracle's Ubuntu image uid 1000 is `opc`
+      # and the login user `ubuntu` is 1001, so downloads would land owned by
+      # someone else. Check with `id -u` and set PUID/PGID in .env.
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
       STATE_DIR: /state
       # Route yt-dlp's traffic through Cloudflare WARP. YouTube blocks requests
       # straight from cloud IP ranges (Oracle included) with "Sign in to confirm
