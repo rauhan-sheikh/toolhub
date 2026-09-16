@@ -109,6 +109,24 @@ own public hostname exercises a different path and can mislead.
 > Use `curl -sv`, not `curl -s`. Plain `-s` silences errors, so a failure prints
 > an empty line and looks like a mystery.
 
+### Diagnosing "Caddy never gets a certificate"
+
+Read the Caddy log before assuming it's the firewall — the two failure modes
+look similar from outside but say very different things:
+
+| Log says | Cause |
+| --- | --- |
+| `lookup ... on 127.0.0.53:53: connection refused` | Container DNS. See "Give Docker real DNS servers" above. |
+| `timeout during connect` / challenge failures | Port 80 unreachable from outside — firewall, layer 1 first. |
+| `could not determine zone` / NXDOMAIN | DNS A record missing or not propagated. |
+
+Check what the container actually resolves with:
+
+```bash
+docker exec caddy cat /etc/resolv.conf
+docker exec caddy nslookup acme-v02.api.letsencrypt.org
+```
+
 ## 4. Install Docker
 
 ```bash
@@ -121,6 +139,29 @@ sudo apt-get update
 sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 sudo usermod -aG docker $USER && newgrp docker
 ```
+
+### Give Docker real DNS servers
+
+**Do this before starting any container.** Ubuntu's `/etc/resolv.conf` points at
+`127.0.0.53`, the systemd-resolved stub listener. That address is only meaningful
+on the host — inside a container's network namespace it refers to the container's
+own loopback, where nothing is listening. Every outbound lookup then fails with
+`connection refused`, which surfaces as Caddy being unable to reach Let's
+Encrypt, or MeTube being unable to resolve anything at all.
+
+```bash
+echo '{ "dns": ["1.1.1.1", "8.8.8.8"] }' | sudo tee /etc/docker/daemon.json
+sudo systemctl restart docker
+```
+
+Verify before moving on:
+
+```bash
+docker run --rm alpine nslookup acme-v02.api.letsencrypt.org
+```
+
+If that returns an address, container DNS is healthy. Daemon-wide rather than
+per-service, since every project on this box needs it.
 
 ## 5. DNS
 
@@ -145,9 +186,21 @@ Once, for the whole box. It owns the `edge` network, so it goes first.
 
 ```bash
 # infra/ can live in its own repo; this copy ships inside the toolhub repo.
-cp -r ~/toolhub/infra ~/infra
+# -T treats the destination as the directory itself. Without it, a second run
+# copies into the existing ~/infra and you end up with ~/infra/infra.
+cp -rT ~/toolhub/infra ~/infra
 cd ~/infra
-echo "ACME_EMAIL=you@example.com" > .env
+cp .env.example .env
+```
+
+Set a **real** email — Let's Encrypt uses it for expiry warnings, and ZeroSSL
+(Caddy's fallback issuer) rejects obvious placeholders outright:
+
+```bash
+nano .env      # ACME_EMAIL=rauhan1998@gmail.com
+```
+
+```bash
 docker compose up -d
 docker compose logs -f caddy      # watch the certificate get issued
 ```
