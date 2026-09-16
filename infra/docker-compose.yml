@@ -1,0 +1,45 @@
+# Shared edge proxy for the whole VPS. Project-independent — deploy this once,
+# then every project (Dockerised or not) plugs into it.
+#
+# Owns the `edge` network; individual projects join it as an external network.
+# Bring this up BEFORE any project stack.
+
+name: infra
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    container_name: caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp" # HTTP/3
+    environment:
+      ACME_EMAIL: ${ACME_EMAIL}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # One file per site. Adding a project = drop a file here + reload.
+      - ./sites:/etc/caddy/sites:ro
+      # Certificates live here. Keep this volume and you keep your certs.
+      - caddy-data:/data
+      - caddy-config:/config
+    # Lets site files reach non-Dockerised services running on the host,
+    # e.g. `reverse_proxy host.docker.internal:4000`.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - edge
+    healthcheck:
+      test: ["CMD", "caddy", "version"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+networks:
+  edge:
+    name: edge
+
+volumes:
+  caddy-data:
+  caddy-config:

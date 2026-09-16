@@ -1,0 +1,22 @@
+# Template for a service that is NOT in Docker — a systemd Node app, a Python
+# service, whatever — listening on a port on the host.
+#
+# Rename to `<project>.caddy` (drop `.disabled`) and reload Caddy to enable.
+#
+# Note: bind the host service to 127.0.0.1 only. Caddy reaches it through the
+# host gateway, so there's no reason to expose it publicly and every reason not
+# to — the VCN firewall is the only thing that would be standing in the way.
+
+# app.rauhansheikh.com {
+# 	import common
+# 	reverse_proxy host.docker.internal:4000
+# }
+
+# Static files served straight from disk, no backend at all. Mount the
+# directory into the caddy container first (see infra/docker-compose.yml).
+#
+# static.rauhansheikh.com {
+# 	import common
+# 	root * /srv/static
+# 	file_server
+# }

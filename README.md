@@ -10,15 +10,43 @@ self-hosted on an Oracle Cloud Ampere instance.
 
 ## Architecture
 
+TLS and routing are **not** part of this stack. They live in a shared, project-
+independent proxy (`infra/`) so the same VPS can host other projects — Dockerised
+or otherwise.
+
 ```
-┌─ caddy    :80/:443   TLS termination, reverse proxy   ← only published ports
-├─ web      :3000      Next.js 16 — UI, API, auth
-├─ metube   :8081      yt-dlp engine                    ← internal network only
-└─ warp     :1080      Cloudflare WARP egress proxy     ← internal network only
+infra/  caddy   :80/:443  ← the only published ports on the box
+        └─ sites/*.caddy     one file per project
+           owns the `edge` network
+
+toolhub/
+  web     joins `edge` + `backend`   Next.js 16 — UI, API, auth
+  metube  `backend` only             yt-dlp engine
+  warp    `backend` only             Cloudflare WARP egress proxy
 ```
 
-MeTube is never exposed to the internet. The only way to queue a download is
+Nothing in this stack publishes a port. Caddy reaches the app by container name
+over the shared `edge` network; MeTube and WARP sit on `backend` and are
+unreachable from outside the host entirely. The only way to queue a download is
 through the authenticated app.
+
+Other projects plug in the same way — join `edge` and add a site file, or, if
+not Dockerised, bind to a host port and let Caddy reach it via
+`host.docker.internal`. See [DEPLOY.md](DEPLOY.md#adding-another-project).
+
+## CI/CD
+
+Push to `main` → [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml)
+builds the image on a **native arm64 runner**, pushes it to GHCR, then SSHes in
+to `docker compose pull && up -d`.
+
+The VPS never compiles anything, so a deploy doesn't compete with the app for
+the box's 2 OCPUs. Images are tagged `latest` and by commit SHA, so rolling back
+is `TOOLHUB_IMAGE=ghcr.io/…:<sha> docker compose up -d web`.
+
+Required repo secrets: `VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY`. GHCR needs no
+long-lived credential on the server — the workflow forwards a job-scoped token
+for the pull and logs out afterwards.
 
 **Why WARP?** YouTube blocks yt-dlp from datacenter IP ranges — Oracle included
 — with *"Sign in to confirm you're not a bot"*. That's
@@ -57,8 +85,11 @@ The downloader degrades gracefully when `METUBE_URL` is unset — it shows a
 See **[DEPLOY.md](DEPLOY.md)** for the full Oracle Cloud walkthrough, including
 how to stay inside the Always Free limits on a Pay As You Go account.
 
+The shared proxy owns the `edge` network, so it goes up first:
+
 ```bash
-docker compose up -d --build
+cd infra && docker compose up -d      # once per box
+cd ..    && docker compose up -d      # per project
 ```
 
 ## Adding a tool
@@ -72,6 +103,12 @@ to keep in sync.
 ## Layout
 
 ```
+infra/                    shared edge proxy — project-independent, deploy once
+├── docker-compose.yml    caddy; owns ports 80/443 and the `edge` network
+├── Caddyfile             global options + `import sites/*.caddy`
+└── sites/                one file per project
+.github/workflows/
+└── deploy.yml            arm64 build → GHCR → SSH deploy
 src/
 ├── proxy.ts              route gate (Next 16 renamed Middleware → Proxy)
 ├── lib/

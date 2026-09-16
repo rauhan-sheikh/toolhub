@@ -1,38 +1,35 @@
-# Rauhan's Toolhub — full stack.
+# Rauhan's Toolhub — application stack.
 #
-# Only caddy publishes ports. metube and warp sit on an internal network and are
-# unreachable from the internet; the only way to queue a download is through the
-# authenticated app.
+# TLS and routing are NOT here; they belong to the shared edge proxy in
+# ./infra, which must be running first (it owns the `edge` network).
+#
+# Nothing in this stack publishes a port. The app is reachable only through
+# Caddy on `edge`; metube and warp sit on `backend` and are unreachable from
+# outside the host entirely.
+
+name: toolhub
 
 services:
-  caddy:
-    image: caddy:2-alpine
-    restart: unless-stopped
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy-data:/data
-      - caddy-config:/config
-    environment:
-      APP_DOMAIN: ${APP_DOMAIN}
-    depends_on:
-      - web
-    networks: [edge]
-
   web:
+    # CI builds this and pushes it to GHCR; the VPS only ever pulls, so deploys
+    # don't spend the box's 2 OCPUs compiling Next.js.
+    image: ${TOOLHUB_IMAGE:-ghcr.io/rauhan-sheikh/toolhub:latest}
+    # Used by `docker compose build` locally; ignored by `docker compose pull`.
     build: .
+    # Explicit, because Caddy addresses this by name across projects and a bare
+    # `web` would collide with the next project that has a `web` service.
+    container_name: toolhub-web
     restart: unless-stopped
     env_file: .env
-    expose:
-      - "3000"
     depends_on:
       - metube
-    networks: [edge, backend]
+    networks:
+      - edge
+      - backend
 
   metube:
     image: ghcr.io/alexta69/metube:latest
+    container_name: toolhub-metube
     restart: unless-stopped
     volumes:
       - ./downloads:/downloads
@@ -50,10 +47,12 @@ services:
     depends_on:
       warp:
         condition: service_healthy
-    networks: [backend]
+    networks:
+      - backend
 
   warp:
     image: caomingjun/warp
+    container_name: toolhub-warp
     restart: unless-stopped
     environment:
       WARP_SLEEP: 2
@@ -75,16 +74,18 @@ services:
       timeout: 10s
       start_period: 30s
       retries: 5
-    networks: [backend]
+    networks:
+      - backend
 
 networks:
+  # Owned by the infra stack — bring that up first.
   edge:
+    name: edge
+    external: true
   # Not marked `internal: true` — WARP needs outbound internet. It simply
   # publishes no ports, so metube and warp are unreachable from outside.
   backend:
 
 volumes:
-  caddy-data:
-  caddy-config:
   metube-state:
   warp-data:

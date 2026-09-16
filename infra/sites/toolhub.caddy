@@ -1,0 +1,8 @@
+tools.rauhansheikh.com {
+	import common
+
+	# `toolhub-web` is the container_name set in the toolhub stack. Both
+	# containers sit on the shared `edge` network, so Docker's DNS resolves it
+	# and the app never needs to publish a port to the host.
+	reverse_proxy toolhub-web:3000
+}

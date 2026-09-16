@@ -1,0 +1,25 @@
+{
+	# Let's Encrypt contact address. Set ACME_EMAIL in infra/.env.
+	email {$ACME_EMAIL}
+}
+
+# Shared defaults any site can pull in with `import common`.
+(common) {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "no-referrer"
+		-Server
+	}
+
+	log {
+		output stdout
+		format console
+	}
+}
+
+# Every project drops one file in ./sites. Nothing else here needs editing.
+import /etc/caddy/sites/*.caddy
