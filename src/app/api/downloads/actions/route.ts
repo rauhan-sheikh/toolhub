@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { requireSession } from "@/lib/api";
 import {
   EngineOfflineError,
+  FileNotAvailableError,
+  deleteDownloadedFile,
   deleteDownloads,
   isConfigured,
   retryDownload,
@@ -33,6 +35,26 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: true });
     }
 
+    // Removes the entry AND the file. MeTube's own delete only clears the
+    // list unless DELETE_FILE_ON_TRASHCAN is on, which would make every
+    // removal destructive; doing it here keeps the choice per-item.
+    if (action === "deleteFile") {
+      const id = String(body?.id ?? "");
+      const filename = String(body?.filename ?? "");
+      if (!id || !filename) {
+        return NextResponse.json(
+          { error: "Need both an id and a filename." },
+          { status: 400 },
+        );
+      }
+
+      await deleteDownloadedFile(filename);
+      // Only drop it from the list once the file is actually gone, so a
+      // failure here never leaves an orphaned file with no way back to it.
+      await deleteDownloads([id], "done");
+      return NextResponse.json({ ok: true });
+    }
+
     if (action === "retry") {
       const id = String(body?.id ?? "");
       if (!id) {
@@ -46,6 +68,9 @@ export async function POST(request: Request) {
   } catch (error) {
     if (error instanceof EngineOfflineError) {
       return NextResponse.json({ error: error.message }, { status: 503 });
+    }
+    if (error instanceof FileNotAvailableError) {
+      return NextResponse.json({ error: error.message }, { status: 404 });
     }
     console.error("Download action failed:", error);
     return NextResponse.json({ error: "Engine error." }, { status: 502 });

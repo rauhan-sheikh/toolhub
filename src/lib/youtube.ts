@@ -54,8 +54,11 @@ export type PlaylistSummary = {
   unavailableCount: number;
   totalSeconds: number;
   averageSeconds: number;
-  longest: { videoId: string; title: string; seconds: number } | null;
+  longest: VideoRef | null;
+  shortest: VideoRef | null;
 };
+
+export type VideoRef = { videoId: string; title: string; seconds: number };
 
 export type PlaylistOption = {
   id: string;
@@ -63,6 +66,11 @@ export type PlaylistOption = {
   itemCount: number;
   privacy: string;
   thumbnail: string | null;
+  /**
+   * "liked" is YouTube's system Liked-videos playlist, which isn't returned by
+   * playlists.list and has no item count.
+   */
+  kind: "owned" | "liked";
 };
 
 /** The signed-in user's own playlists, private ones included. */
@@ -89,11 +97,37 @@ export async function listMyPlaylists(
         itemCount: item.contentDetails?.itemCount ?? 0,
         privacy: item.status?.privacyStatus ?? "unknown",
         thumbnail: item.snippet?.thumbnails?.medium?.url ?? null,
+        kind: "owned",
       });
     }
 
     pageToken = response.data.nextPageToken ?? undefined;
   } while (pageToken);
+
+  playlists.sort((a, b) => a.title.localeCompare(b.title));
+
+  // Liked videos is a real, measurable playlist but playlists.list never
+  // returns it — it only comes back as a related playlist on the channel.
+  try {
+    const channel = await youtube.channels.list({
+      part: ["contentDetails"],
+      mine: true,
+    });
+    const liked =
+      channel.data.items?.[0]?.contentDetails?.relatedPlaylists?.likes;
+    if (liked) {
+      playlists.unshift({
+        id: liked,
+        title: "Liked videos",
+        itemCount: 0,
+        privacy: "private",
+        thumbnail: null,
+        kind: "liked",
+      });
+    }
+  } catch {
+    // Not fatal — the rest of the list is still useful.
+  }
 
   return playlists;
 }
@@ -138,7 +172,8 @@ export async function fetchPlaylistSummary(
 
   let totalSeconds = 0;
   let countedCount = 0;
-  let longest: PlaylistSummary["longest"] = null;
+  let longest: VideoRef | null = null;
+  let shortest: VideoRef | null = null;
 
   for (let i = 0; i < selected.length; i += 50) {
     const chunk = selected.slice(i, i + 50);
@@ -152,12 +187,18 @@ export async function fetchPlaylistSummary(
       totalSeconds += seconds;
       countedCount += 1;
 
-      if (!longest || seconds > longest.seconds) {
-        longest = {
-          videoId: item.id ?? "",
-          title: item.snippet?.title ?? "Untitled",
-          seconds,
-        };
+      const ref: VideoRef = {
+        videoId: item.id ?? "",
+        title: item.snippet?.title ?? "Untitled",
+        seconds,
+      };
+
+      if (!longest || seconds > longest.seconds) longest = ref;
+
+      // Live and upcoming streams report a zero duration. Treating those as
+      // "the shortest video" would be wrong every time one is present.
+      if (seconds > 0 && (!shortest || seconds < shortest.seconds)) {
+        shortest = ref;
       }
     }
   }
@@ -173,5 +214,6 @@ export async function fetchPlaylistSummary(
     totalSeconds,
     averageSeconds: countedCount > 0 ? Math.round(totalSeconds / countedCount) : 0,
     longest,
+    shortest,
   };
 }

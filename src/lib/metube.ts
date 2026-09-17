@@ -181,3 +181,62 @@ export async function retryDownload(id: string): Promise<void> {
     body: JSON.stringify({ id }),
   });
 }
+
+/* ------------------------------------------------------------------ *
+ * Finished files on disk
+ *
+ * MeTube writes into a volume this container also mounts, so the app can
+ * hand the file to the browser and delete it without going through MeTube.
+ * MeTube has no per-item "delete the file" API — only a global
+ * DELETE_FILE_ON_TRASHCAN flag that would make every removal destructive.
+ * ------------------------------------------------------------------ */
+
+export function downloadsRoot(): string {
+  return optionalEnv("DOWNLOADS_DIR") ?? "/downloads";
+}
+
+export class FileNotAvailableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "FileNotAvailableError";
+  }
+}
+
+/**
+ * Resolves a MeTube `filename` (relative to the download dir) to an absolute
+ * path, refusing anything that escapes the root.
+ *
+ * The value originates from yt-dlp metadata — a video title becomes a
+ * filename — so it is attacker-influenced and must never be trusted to stay
+ * inside the directory on its own.
+ */
+export async function resolveDownloadPath(relative: string): Promise<string> {
+  const path = await import("node:path");
+  const fs = await import("node:fs/promises");
+
+  const root = path.resolve(downloadsRoot());
+  const target = path.resolve(root, relative);
+
+  if (target !== root && !target.startsWith(root + path.sep)) {
+    throw new FileNotAvailableError("Refusing a path outside the download directory.");
+  }
+
+  try {
+    const stat = await fs.stat(target);
+    if (!stat.isFile()) {
+      throw new FileNotAvailableError("Not a file.");
+    }
+  } catch (error) {
+    if (error instanceof FileNotAvailableError) throw error;
+    throw new FileNotAvailableError(
+      "That file is no longer on the server. It may have been cleared or moved.",
+    );
+  }
+
+  return target;
+}
+
+export async function deleteDownloadedFile(relative: string): Promise<void> {
+  const fs = await import("node:fs/promises");
+  await fs.unlink(await resolveDownloadPath(relative));
+}

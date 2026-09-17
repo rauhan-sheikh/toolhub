@@ -294,7 +294,7 @@ function DownloadRow({
             {failed
               ? (item.error ?? item.msg ?? "Failed")
               : done
-                ? `Finished · ${formatBytes(item.size)}`
+                ? `Finished · ${formatBytes(item.size)} · saved on the server`
                 : [
                     item.status,
                     item.speed ? `${formatBytes(item.speed)}/s` : null,
@@ -305,7 +305,18 @@ function DownloadRow({
           </p>
         </div>
 
-        <div className="flex shrink-0 items-center gap-2 min-[420px]:justify-end">
+        <div className="flex shrink-0 flex-wrap items-center gap-2 min-[420px]:justify-end">
+          {done && !failed && item.filename && (
+            <a
+              href={`/api/downloads/file?name=${encodeURIComponent(item.filename)}`}
+              download
+              title="Save this file to your device"
+              className="rounded-lg accent-bg px-2.5 py-1.5 text-xs font-semibold text-white transition hover:opacity-90"
+            >
+              Save to device
+            </a>
+          )}
+
           {failed && (
             <button
               onClick={() => onAct({ action: "retry", id: item.id })}
@@ -314,6 +325,7 @@ function DownloadRow({
               Retry
             </button>
           )}
+
           <button
             onClick={() =>
               onAct({
@@ -322,10 +334,37 @@ function DownloadRow({
                 where: done ? "done" : "queue",
               })
             }
-            className="rounded-lg border border-[var(--border)] px-2.5 py-1.5 text-xs text-[var(--muted)] transition hover:border-red-500/40 hover:text-red-300"
+            title={
+              done
+                ? "Remove this entry from the list. The file stays on the server."
+                : "Stop this download and remove it from the queue."
+            }
+            className="rounded-lg border border-[var(--border)] px-2.5 py-1.5 text-xs text-[var(--muted)] transition hover:border-white/25 hover:text-[var(--foreground)]"
           >
-            {done ? "Clear" : "Cancel"}
+            {done ? "Remove from list" : "Cancel"}
           </button>
+
+          {done && item.filename && (
+            <button
+              onClick={() => {
+                if (
+                  window.confirm(
+                    `Permanently delete "${item.title}" from the server? This cannot be undone.`,
+                  )
+                ) {
+                  onAct({
+                    action: "deleteFile",
+                    id: item.id,
+                    filename: item.filename,
+                  });
+                }
+              }}
+              title="Delete the file from the server's disk as well as the list"
+              className="rounded-lg border border-red-500/30 px-2.5 py-1.5 text-xs text-red-300 transition hover:border-red-500/60 hover:bg-red-500/10"
+            >
+              Delete file
+            </button>
+          )}
         </div>
       </div>
 
