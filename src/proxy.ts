@@ -22,7 +22,15 @@ const PUBLIC_PATHS = [
   "/terms",
 ];
 
+/**
+ * Paths public at that exact address only. Kept apart from PUBLIC_PATHS
+ * because the prefix match below would treat "/" as a prefix of every route
+ * and silently unlock the entire app.
+ */
+const PUBLIC_EXACT_PATHS = ["/"];
+
 function isPublic(pathname: string): boolean {
+  if (PUBLIC_EXACT_PATHS.includes(pathname)) return true;
   return PUBLIC_PATHS.some(
     (path) => pathname === path || pathname.startsWith(`${path}/`),
   );
