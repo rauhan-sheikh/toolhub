@@ -282,7 +282,7 @@ function DownloadRow({
 
   return (
     <li className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-4">
+      <div className="flex flex-col gap-3 min-[420px]:flex-row min-[420px]:items-start min-[420px]:gap-4">
         <div className="min-w-0 flex-1">
           <p
             className="line-clamp-2 text-sm font-medium break-words"
@@ -305,7 +305,7 @@ function DownloadRow({
           </p>
         </div>
 
-        <div className="flex shrink-0 items-center gap-2 sm:justify-end">
+        <div className="flex shrink-0 items-center gap-2 min-[420px]:justify-end">
           {failed && (
             <button
               onClick={() => onAct({ action: "retry", id: item.id })}

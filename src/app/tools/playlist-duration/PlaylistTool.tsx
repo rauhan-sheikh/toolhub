@@ -227,7 +227,7 @@ function Results({ summary }: { summary: PlaylistSummary }) {
               </dd>
             </div>
             {summary.longest && (
-              <div className="flex flex-col gap-0.5 sm:flex-row sm:justify-between sm:gap-4">
+              <div className="flex items-start justify-between gap-4">
                 <dt className="min-w-0 text-[var(--muted)]">
                   <span
                     className="line-clamp-2 break-words"

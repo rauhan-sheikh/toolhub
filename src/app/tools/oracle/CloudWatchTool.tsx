@@ -371,7 +371,7 @@ function Table({ head, rows }: { head: string[]; rows: string[][] }) {
       {/* Phones get one card per row. Resource names like a full DNS zone are
           long and arbitrary, so a real table here would force the reader to
           scroll sideways inside the panel to see the values. */}
-      <ul className="space-y-2.5 sm:hidden">
+      <ul className="space-y-2.5 min-[480px]:hidden">
         {rows.map((row, i) => (
           <li
             key={i}
@@ -398,7 +398,7 @@ function Table({ head, rows }: { head: string[]; rows: string[][] }) {
         ))}
       </ul>
 
-      <div className="hidden overflow-x-auto sm:block">
+      <div className="hidden overflow-x-auto min-[480px]:block">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-[var(--border)] text-left">
