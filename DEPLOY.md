@@ -170,15 +170,59 @@ public IP. Verify with `dig +short tools.rauhansheikh.com`.
 
 ## 6. Google OAuth
 
-1. [Console](https://console.cloud.google.com/) → new project → **APIs &
-   Services → Library → YouTube Data API v3 → Enable**
-2. **OAuth consent screen**: External. Scopes `openid`, `email`,
-   `https://www.googleapis.com/auth/youtube.readonly`
-3. **Set publishing status to "In production".** In *Testing*, Google expires
-   refresh tokens after **7 days** and the app breaks weekly.
-4. **Credentials → OAuth client ID → Web application**, redirect URI
-   `https://tools.rauhansheikh.com/api/auth/callback` — must match `APP_URL`
-   exactly.
+Google replaced the old "OAuth consent screen" page with **Google Auth
+Platform**, split into Branding / Audience / Clients / Data access. Older guides
+describe menus that no longer exist.
+
+1. **APIs & Services → Library → YouTube Data API v3 → Enable.** Without this
+   every playlist call returns 403, however good the OAuth setup is.
+
+2. **APIs & Services → Google Auth Platform → Branding.** Set *App name* to
+   something you'll recognise on the consent screen — it appears as "continue to
+   <app name>". Leaving it as your email address works but reads oddly.
+
+3. **→ Audience.** User type **External**.
+
+   **Set publishing status to "In production".** This is the one that bites: in
+   *Testing*, Google expires refresh tokens after **7 days**, so the app signs
+   you out every week for no visible reason. "In production" without
+   verification is fine for personal use — you click past a warning once, and
+   the 100-user cap is irrelevant.
+
+4. **→ Data access → Add or remove scopes.** Add `openid`, `email` (or
+   `userinfo.email`), and `https://www.googleapis.com/auth/youtube.readonly`.
+   The app requests exactly these; a missing YouTube scope means private
+   playlists stay invisible.
+
+5. **→ Clients → Create client → Web application.** Authorised redirect URI:
+
+   ```
+   https://tools.rauhansheikh.com/api/auth/callback
+   ```
+
+   It must match `APP_URL` exactly — scheme, host, path, no trailing slash.
+   A mismatch shows as `Error 400: redirect_uri_mismatch`.
+
+6. Copy the client ID and secret into `~/toolhub/.env`, then
+   `docker compose up -d web` to pick them up.
+
+### Checking it without signing in
+
+```bash
+# Follow our login redirect and see what Google makes of it
+URL=$(curl -s -o /dev/null -w "%{redirect_url}" https://tools.rauhansheikh.com/api/auth/login)
+curl -sL "$URL" | grep -oiE "redirect_uri_mismatch|invalid_client|Sign in with Google"
+```
+
+`Sign in with Google` means the client ID and redirect URI are accepted. This
+cannot tell you the publishing status — check that in Audience.
+
+### First sign-in
+
+An unverified production app shows **"Google hasn't verified this app"**. Click
+**Advanced → Go to <app name> (unsafe)**. It's your own app and your own
+account; the warning only reflects that you haven't paid for a verification
+review. It appears once per account.
 
 ## 7. Bring up the shared proxy
 
