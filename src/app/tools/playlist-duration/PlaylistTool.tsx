@@ -177,11 +177,11 @@ function Results({ summary }: { summary: PlaylistSummary }) {
     <section className="mt-6 space-y-4">
       <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-6">
         {summary.title && (
-          <p className="mb-1 truncate text-sm text-[var(--muted)]">
+          <p className="mb-1 line-clamp-2 text-sm break-words text-[var(--muted)]">
             {summary.title}
           </p>
         )}
-        <p className="text-5xl font-semibold tracking-tight tabular-nums">
+        <p className="text-4xl font-semibold tracking-tight tabular-nums sm:text-5xl">
           {formatDuration(summary.totalSeconds)}
         </p>
         <p className="mt-2 text-sm text-[var(--muted)]">
@@ -199,7 +199,7 @@ function Results({ summary }: { summary: PlaylistSummary }) {
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2">
-        <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5">
+        <div className="min-w-0 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5">
           <h3 className="mb-3 text-xs font-semibold uppercase tracking-[0.2em] text-[var(--muted)]">
             At speed
           </h3>
@@ -215,7 +215,7 @@ function Results({ summary }: { summary: PlaylistSummary }) {
           </ul>
         </div>
 
-        <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5">
+        <div className="min-w-0 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5">
           <h3 className="mb-3 text-xs font-semibold uppercase tracking-[0.2em] text-[var(--muted)]">
             Breakdown
           </h3>
@@ -227,9 +227,12 @@ function Results({ summary }: { summary: PlaylistSummary }) {
               </dd>
             </div>
             {summary.longest && (
-              <div className="flex justify-between gap-4">
+              <div className="flex flex-col gap-0.5 sm:flex-row sm:justify-between sm:gap-4">
                 <dt className="min-w-0 text-[var(--muted)]">
-                  <span className="block truncate" title={summary.longest.title}>
+                  <span
+                    className="line-clamp-2 break-words"
+                    title={summary.longest.title}
+                  >
                     Longest: {summary.longest.title}
                   </span>
                 </dt>

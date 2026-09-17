@@ -282,12 +282,15 @@ function DownloadRow({
 
   return (
     <li className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
-      <div className="flex items-start gap-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-4">
         <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-medium" title={item.title}>
+          <p
+            className="line-clamp-2 text-sm font-medium break-words"
+            title={item.title}
+          >
             {item.title}
           </p>
-          <p className="mt-1 truncate text-xs text-[var(--muted)]">
+          <p className="mt-1 line-clamp-2 text-xs break-words text-[var(--muted)]">
             {failed
               ? (item.error ?? item.msg ?? "Failed")
               : done
@@ -302,7 +305,7 @@ function DownloadRow({
           </p>
         </div>
 
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="flex shrink-0 items-center gap-2 sm:justify-end">
           {failed && (
             <button
               onClick={() => onAct({ action: "retry", id: item.id })}
@@ -378,12 +381,12 @@ function Select({
   options: { value: string; label: string }[];
 }) {
   return (
-    <label className="inline-flex items-center gap-2 rounded-xl border border-[var(--border)] bg-black/30 px-3 py-1.5">
-      <span className="text-xs text-[var(--muted)]">{label}</span>
+    <label className="inline-flex min-w-0 max-w-full items-center gap-2 rounded-xl border border-[var(--border)] bg-black/30 px-3 py-1.5">
+      <span className="shrink-0 text-xs text-[var(--muted)]">{label}</span>
       <select
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        className="bg-transparent text-xs font-medium outline-none"
+        className="min-w-0 bg-transparent text-xs font-medium outline-none"
       >
         {options.map((option) => (
           <option

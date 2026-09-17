@@ -160,7 +160,7 @@ export function CloudWatchTool() {
         </div>
       )}
 
-      <div className="flex items-center justify-between text-xs text-[var(--muted)]">
+      <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-[var(--muted)]">
         <span>
           Fetched {new Date(s.fetchedAt).toLocaleTimeString()} · cached 5 min
         </span>
@@ -329,12 +329,12 @@ function Stat({
   alarming?: boolean;
 }) {
   return (
-    <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5">
+    <div className="min-w-0 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5">
       <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--muted)]">
         {label}
       </p>
       <p
-        className={`mt-2 text-3xl font-semibold tabular-nums ${
+        className={`mt-2 text-2xl font-semibold break-words tabular-nums sm:text-3xl ${
           alarming ? "text-red-300" : ""
         }`}
       >
@@ -367,38 +367,73 @@ function Panel({
 
 function Table({ head, rows }: { head: string[]; rows: string[][] }) {
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full min-w-[22rem] text-sm">
-        <thead>
-          <tr className="border-b border-[var(--border)] text-left">
-            {head.map((h) => (
-              <th
-                key={h}
-                className="pb-2 text-xs font-medium uppercase tracking-wide text-[var(--muted)]"
+    <>
+      {/* Phones get one card per row. Resource names like a full DNS zone are
+          long and arbitrary, so a real table here would force the reader to
+          scroll sideways inside the panel to see the values. */}
+      <ul className="space-y-2.5 sm:hidden">
+        {rows.map((row, i) => (
+          <li
+            key={i}
+            className="rounded-xl border border-[var(--border)] bg-black/20 p-3"
+          >
+            {row.map((cell, j) => (
+              <div
+                key={j}
+                className="flex items-baseline justify-between gap-3 py-0.5"
               >
-                {h}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row, i) => (
-            <tr
-              key={i}
-              className="border-b border-[var(--border)]/50 last:border-0"
-            >
-              {row.map((cell, j) => (
-                <td
-                  key={j}
-                  className={`py-2 pr-4 ${j === 0 ? "" : "tabular-nums text-[var(--muted)]"}`}
+                <span className="shrink-0 text-[10px] font-medium uppercase tracking-wide text-[var(--muted)]">
+                  {head[j]}
+                </span>
+                <span
+                  className={`min-w-0 break-words text-right text-sm ${
+                    j === 0 ? "" : "tabular-nums"
+                  }`}
                 >
                   {cell}
-                </td>
+                </span>
+              </div>
+            ))}
+          </li>
+        ))}
+      </ul>
+
+      <div className="hidden overflow-x-auto sm:block">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-[var(--border)] text-left">
+              {head.map((h) => (
+                <th
+                  key={h}
+                  className="pb-2 text-xs font-medium uppercase tracking-wide text-[var(--muted)]"
+                >
+                  {h}
+                </th>
               ))}
             </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+          </thead>
+          <tbody>
+            {rows.map((row, i) => (
+              <tr
+                key={i}
+                className="border-b border-[var(--border)]/50 last:border-0"
+              >
+                {row.map((cell, j) => (
+                  <td
+                    key={j}
+                    className={`py-2 pr-4 align-top break-words ${
+                      j === 0 ? "" : "tabular-nums text-[var(--muted)]"
+                    }`}
+                  >
+                    {cell}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
   );
 }
+
