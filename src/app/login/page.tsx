@@ -72,6 +72,16 @@ export default async function LoginPage({
           Grants read-only access to your YouTube playlists, so private ones can
           be measured.
         </p>
+
+        <p className="mt-4 text-xs text-[var(--muted)]">
+          <a href="/privacy" className="underline hover:text-[var(--foreground)]">
+            Privacy
+          </a>
+          <span className="mx-2">&middot;</span>
+          <a href="/terms" className="underline hover:text-[var(--foreground)]">
+            Terms
+          </a>
+        </p>
       </div>
     </main>
   );

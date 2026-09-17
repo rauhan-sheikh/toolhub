@@ -16,6 +16,10 @@ const PUBLIC_PATHS = [
   "/api/auth/login",
   "/api/auth/callback",
   "/api/health",
+  // Must stay reachable signed-out: Google fetches these while reviewing the
+  // OAuth consent screen, and they're linked from the sign-in page.
+  "/privacy",
+  "/terms",
 ];
 
 function isPublic(pathname: string): boolean {
