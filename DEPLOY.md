@@ -305,7 +305,54 @@ images are also tagged by commit SHA:
 TOOLHUB_IMAGE=ghcr.io/rauhan-sheikh/toolhub:<sha> docker compose up -d web
 ```
 
-## 10. Verify
+## 10. Cloud Watch (Oracle billing monitor)
+
+Reads tenancy-wide cost, Always Free headroom, budgets and every resource that
+could bill. Needs no API key — the app authenticates as the instance itself.
+
+**a. Tenancy OCID** into `~/toolhub/.env`. Read it off the VM rather than
+hunting through the console:
+
+```bash
+curl -s -H "Authorization: Bearer Oracle" http://169.254.169.254/opc/v2/instance/   | grep -o '"tenantId"[^,]*'
+```
+
+Set `OCI_TENANCY_OCID` to that value, then
+`docker compose up -d --force-recreate web`. It is an identifier, not a secret.
+
+**b. Dynamic Group.** Identity & Security → Domains → Default → Dynamic groups
+→ Create. Name `toolhub-monitor`, one matching rule:
+
+```
+instance.id = '<your instance OCID>'
+```
+
+The instance OCID comes from the same metadata call above (`"id"`).
+
+**c. Policy.** Identity & Security → Policies → Create Policy, in the **root**
+compartment, manual editor:
+
+```
+Allow dynamic-group 'Default'/'toolhub-monitor' to read usage-report in tenancy
+Allow dynamic-group 'Default'/'toolhub-monitor' to read usage-budgets in tenancy
+Allow dynamic-group 'Default'/'toolhub-monitor' to inspect all-resources in tenancy
+```
+
+> The budgets resource type is **`usage-budgets`**, not `budgets`. Using the
+> latter fails with the unhelpful `API Error: No permissions found`.
+
+Three separate reads: cost, budgets, inventory. Each degrades to a warning on
+the page rather than blanking it, so a missing statement is visible.
+
+**d. Budget alert.** Billing & Cost Management → Budgets → $1 monthly, alert
+rule on **actual** spend at **1%**.
+
+This is not optional garnish. OCI budgets are explicitly *soft* limits — they
+notify and never block — but Oracle evaluates them every 24 hours and emails
+you **even when your VM is down**, which is exactly when a dashboard on that VM
+is useless. Cloud Watch renders a missing budget as a finding for that reason.
+
+## 11. Verify
 
 ```bash
 # WARP tunnel up — this is what makes YouTube downloads work at all

@@ -7,6 +7,7 @@ self-hosted on an Oracle Cloud Ampere instance.
 | --- | --- |
 | **Playlist Duration** | Total runtime of any YouTube playlist, **private ones included**, with playback-speed maths and a count of unavailable videos |
 | **Downloader** | A yt-dlp front end for video, audio, subtitles and thumbnails, with a live queue |
+| **Cloud Watch** | Oracle tenancy spend, Always Free headroom with month-end projection, budget alerts and full resource inventory |
 
 ## Architecture
 
