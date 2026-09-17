@@ -93,6 +93,19 @@ export function CloudWatchTool() {
         />
       </div>
 
+      {s.freeTier.length > 0 && (
+        <Panel
+          title="Always Free headroom"
+          note="Cost stays at zero right up until an allowance is crossed. Projection extrapolates this month's rate to month end."
+        >
+          <div className="space-y-4">
+            {s.freeTier.map((row) => (
+              <Allowance key={row.label} row={row} />
+            ))}
+          </div>
+        </Panel>
+      )}
+
       {s.byService.length > 0 && (
         <Panel title="What is costing money">
           <Table
@@ -160,6 +173,55 @@ export function CloudWatchTool() {
           Refresh
         </button>
       </div>
+    </div>
+  );
+}
+
+function Allowance({ row }: { row: OciSnapshot["freeTier"][number] }) {
+  const danger = row.percentProjected >= 100;
+  const warn = !danger && row.percentProjected >= 80;
+  const bar = danger
+    ? "bg-red-500"
+    : warn
+      ? "bg-amber-400"
+      : "bg-emerald-500";
+
+  const fmt = (n: number) =>
+    n.toLocaleString(undefined, { maximumFractionDigits: 0 });
+
+  return (
+    <div>
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3 text-sm">
+        <span>{row.label}</span>
+        <span className="tabular-nums text-[var(--muted)]">
+          {fmt(row.used)} / {fmt(row.limit)} {row.unit}
+          <span className="ml-2 text-xs">
+            ({row.percentUsed.toFixed(0)}%)
+          </span>
+        </span>
+      </div>
+
+      <div className="relative mt-2 h-2 overflow-hidden rounded-full bg-white/10">
+        {/* Projection sits behind as a ghost, actual usage in front. */}
+        <div
+          className="absolute inset-y-0 left-0 rounded-full bg-white/15"
+          style={{ width: `${Math.min(100, row.percentProjected)}%` }}
+        />
+        <div
+          className={`absolute inset-y-0 left-0 rounded-full ${bar}`}
+          style={{ width: `${Math.min(100, row.percentUsed)}%` }}
+        />
+      </div>
+
+      <p
+        className={`mt-1 text-xs ${
+          danger ? "text-red-300" : warn ? "text-amber-300" : "text-[var(--muted)]"
+        }`}
+      >
+        {danger
+          ? `On track to exceed the free allowance — projected ${fmt(row.projected)} ${row.unit} (${row.percentProjected.toFixed(0)}%). This will bill.`
+          : `Projected ${fmt(row.projected)} ${row.unit} by month end (${row.percentProjected.toFixed(0)}%).`}
+      </p>
     </div>
   );
 }

@@ -31,6 +31,17 @@ export type ResourceRow = {
   compartmentId: string;
 };
 
+export type FreeTierRow = {
+  label: string;
+  used: number;
+  /** Linear extrapolation of the month-to-date rate to month end. */
+  projected: number;
+  limit: number;
+  unit: string;
+  percentUsed: number;
+  percentProjected: number;
+};
+
 export type BudgetRow = {
   name: string;
   amount: number;
@@ -47,6 +58,7 @@ export type OciSnapshot = {
   byService: ServiceCost[];
   usage: UsageLine[];
   resources: ResourceRow[];
+  freeTier: FreeTierRow[];
   budgets: BudgetRow[];
   periodStart: string;
   periodEnd: string;
@@ -267,6 +279,72 @@ async function fetchBudgets(
   }));
 }
 
+/**
+ * Always Free allowances, keyed off the SKU/unit strings Oracle actually
+ * returns. Cost alone can't warn you here: you sit at zero right up until you
+ * cross an allowance, and then you don't.
+ *
+ * Compute figures were halved on 15 June 2026 (4 OCPU/24 GB -> 2/12), which is
+ * 1,500 OCPU-hours and 9,000 GB-hours per month.
+ */
+const FREE_TIER: {
+  label: string;
+  limit: number;
+  unit: string;
+  match: (line: UsageLine) => boolean;
+}[] = [
+  {
+    label: "Ampere A1 compute",
+    limit: 1500,
+    unit: "OCPU-hours",
+    match: (l) => l.service === "Compute" && /OCPU Per Hour/i.test(l.unit),
+  },
+  {
+    label: "Ampere A1 memory",
+    limit: 9000,
+    unit: "GB-hours",
+    match: (l) => l.service === "Compute" && /Gigabyte Per Hour/i.test(l.unit),
+  },
+  {
+    label: "Block storage",
+    limit: 200,
+    unit: "GB",
+    match: (l) => l.service === "Block Storage",
+  },
+  {
+    label: "Outbound transfer",
+    limit: 10240,
+    unit: "GB",
+    match: (l) => /Outbound Data Transfer/i.test(l.sku),
+  },
+];
+
+function computeFreeTier(usage: UsageLine[], start: Date): FreeTierRow[] {
+  const monthEnd = new Date(
+    Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + 1, 1),
+  );
+  const elapsed = Date.now() - start.getTime();
+  const whole = monthEnd.getTime() - start.getTime();
+  // Guard the first moments of a month, where the ratio explodes.
+  const ratio = elapsed > 3600_000 ? whole / elapsed : 1;
+
+  return FREE_TIER.map(({ label, limit, unit, match }) => {
+    const used = usage
+      .filter(match)
+      .reduce((sum, line) => sum + line.quantity, 0);
+    const projected = used * ratio;
+    return {
+      label,
+      used,
+      projected,
+      limit,
+      unit,
+      percentUsed: (used / limit) * 100,
+      percentProjected: (projected / limit) * 100,
+    };
+  }).filter((row) => row.used > 0);
+}
+
 let cache: { at: number; snapshot: OciSnapshot } | null = null;
 const CACHE_MS = 5 * 60 * 1000;
 
@@ -311,6 +389,7 @@ export async function getSnapshot(force = false): Promise<OciSnapshot> {
     byService: cost.byService,
     usage,
     resources,
+    freeTier: computeFreeTier(usage, start),
     budgets: budgetRows,
     periodStart: start.toISOString(),
     periodEnd: end.toISOString(),
