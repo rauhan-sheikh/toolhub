@@ -46,6 +46,10 @@ export async function GET(request: Request) {
     const filename = basename(path);
     const type = CONTENT_TYPES[extname(path).toLowerCase()] ?? "application/octet-stream";
 
+    const asciiName = filename
+      .replace(/[^\x20-\x7E]/g, "_")
+      .replace(/["\\]/g, "_");
+
     const body = Readable.toWeb(
       createReadStream(path),
     ) as unknown as ReadableStream<Uint8Array>;
@@ -54,8 +58,12 @@ export async function GET(request: Request) {
       headers: {
         "Content-Type": type,
         "Content-Length": String(size),
-        // RFC 5987 form as well, so non-ASCII titles survive the trip.
-        "Content-Disposition": `attachment; filename="${filename.replace(/["\\]/g, "_")}"; filename*=UTF-8''${encodeURIComponent(filename)}`,
+        // Header values are ByteStrings, so any character above U+00FF throws
+        // when the header is set. Video titles routinely contain them — a real
+        // download here was named "… ｜ …" (U+FF5C) — so the quoted form has to
+        // be ASCII-only. The true name rides on the RFC 5987 parameter, which
+        // every current browser prefers anyway.
+        "Content-Disposition": `attachment; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent(filename)}`,
         "Cache-Control": "private, no-store",
       },
     });
