@@ -7,6 +7,13 @@ const paths: Record<Tool["icon"], React.ReactNode> = {
       <path d="m16 13 5 3-5 3z" />
     </>
   ),
+  gauge: (
+    <>
+      <path d="M12 14a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z" />
+      <path d="m13.4 10.6 4.1-4.1" />
+      <path d="M4.2 18a9 9 0 1 1 15.6 0" />
+    </>
+  ),
   download: (
     <>
       <path d="M12 3v12" />

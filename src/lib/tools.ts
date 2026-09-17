@@ -12,7 +12,7 @@ export type Tool = {
   description: string;
   /** HSL triple, assigned to --accent so the page tints itself. */
   accent: string;
-  icon: "playlist" | "download";
+  icon: "playlist" | "download" | "gauge";
   status: "live" | "planned";
 };
 
@@ -35,6 +35,16 @@ export const TOOLS: Tool[] = [
       "A yt-dlp front end for grabbing video, audio, subtitles and thumbnails from YouTube and a thousand other sites, with a live queue.",
     accent: "258 90% 66%",
     icon: "download",
+    status: "live",
+  },
+  {
+    slug: "oracle",
+    name: "Cloud Watch",
+    tagline: "What is Oracle actually charging me?",
+    description:
+      "Month-to-date spend across the whole Oracle tenancy, broken down by service, with every resource that exists and whether a budget alert is guarding it.",
+    accent: "150 65% 45%",
+    icon: "gauge",
     status: "live",
   },
 ];

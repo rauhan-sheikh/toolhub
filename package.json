@@ -12,6 +12,10 @@
     "googleapis": "^173.0.0",
     "jose": "^6.2.12",
     "next": "16.2.9",
+    "oci-budget": "^2.140.2",
+    "oci-common": "^2.141.0",
+    "oci-resourcesearch": "^2.141.0",
+    "oci-usageapi": "^2.140.2",
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "server-only": "^0.0.1"
