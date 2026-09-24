@@ -6,7 +6,6 @@ const nextConfig: NextConfig = {
   // Large CJS SDKs that Next doesn't auto-externalize and that break when
   // bundled into the server build.
   serverExternalPackages: [
-    "googleapis",
     "oci-common",
     "oci-usageapi",
     "oci-resourcesearch",

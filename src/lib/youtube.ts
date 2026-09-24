@@ -1,5 +1,6 @@
-import { google } from "googleapis";
-import type { GoogleOAuth2Client } from "@/lib/google";
+import "server-only";
+
+import { GoogleApiError, type YouTubeAuth } from "@/lib/google";
 
 /**
  * Parses an ISO 8601 duration into seconds.
@@ -73,23 +74,80 @@ export type PlaylistOption = {
   kind: "owned" | "liked";
 };
 
+type Page<T> = { items?: T[]; nextPageToken?: string };
+
+/**
+ * One YouTube Data API v3 GET.
+ *
+ * Every call passes `fields`, so Google returns only what's read below —
+ * `videos.list` with `snippet` otherwise ships each video's full description
+ * and thumbnail set just so we can show a title.
+ */
+async function yt<T>(
+  resource: string,
+  params: Record<string, string | number | boolean | undefined>,
+  auth: YouTubeAuth,
+): Promise<T> {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined) query.set(key, String(value));
+  }
+  const headers: Record<string, string> = {};
+  if ("apiKey" in auth) query.set("key", auth.apiKey);
+  else headers.Authorization = `Bearer ${auth.accessToken}`;
+
+  const response = await fetch(
+    `https://www.googleapis.com/youtube/v3/${resource}?${query}`,
+    { headers, cache: "no-store" },
+  );
+
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as {
+      error?: {
+        code?: number;
+        message?: string;
+        errors?: { reason?: string; message?: string }[];
+      };
+    } | null;
+    throw new GoogleApiError(
+      body?.error?.code ?? response.status,
+      body?.error?.message ?? `YouTube returned ${response.status}`,
+      body?.error?.errors,
+    );
+  }
+
+  return (await response.json()) as T;
+}
+
 /** The signed-in user's own playlists, private ones included. */
 export async function listMyPlaylists(
-  auth: GoogleOAuth2Client,
+  auth: YouTubeAuth,
 ): Promise<PlaylistOption[]> {
-  const youtube = google.youtube({ version: "v3", auth });
   const playlists: PlaylistOption[] = [];
   let pageToken: string | undefined;
 
   do {
-    const response = await youtube.playlists.list({
-      part: ["snippet", "contentDetails", "status"],
-      mine: true,
-      maxResults: 50,
-      pageToken,
-    });
+    const response = await yt<
+      Page<{
+        id?: string;
+        snippet?: { title?: string; thumbnails?: { medium?: { url?: string } } };
+        contentDetails?: { itemCount?: number };
+        status?: { privacyStatus?: string };
+      }>
+    >(
+      "playlists",
+      {
+        part: "snippet,contentDetails,status",
+        mine: true,
+        maxResults: 50,
+        pageToken,
+        fields:
+          "nextPageToken,items(id,snippet(title,thumbnails/medium/url),contentDetails/itemCount,status/privacyStatus)",
+      },
+      auth,
+    );
 
-    for (const item of response.data.items ?? []) {
+    for (const item of response.items ?? []) {
       if (!item.id) continue;
       playlists.push({
         id: item.id,
@@ -101,7 +159,7 @@ export async function listMyPlaylists(
       });
     }
 
-    pageToken = response.data.nextPageToken ?? undefined;
+    pageToken = response.nextPageToken ?? undefined;
   } while (pageToken);
 
   playlists.sort((a, b) => a.title.localeCompare(b.title));
@@ -109,12 +167,18 @@ export async function listMyPlaylists(
   // Liked videos is a real, measurable playlist but playlists.list never
   // returns it — it only comes back as a related playlist on the channel.
   try {
-    const channel = await youtube.channels.list({
-      part: ["contentDetails"],
-      mine: true,
-    });
-    const liked =
-      channel.data.items?.[0]?.contentDetails?.relatedPlaylists?.likes;
+    const channel = await yt<
+      Page<{ contentDetails?: { relatedPlaylists?: { likes?: string } } }>
+    >(
+      "channels",
+      {
+        part: "contentDetails",
+        mine: true,
+        fields: "items/contentDetails/relatedPlaylists/likes",
+      },
+      auth,
+    );
+    const liked = channel.items?.[0]?.contentDetails?.relatedPlaylists?.likes;
     if (liked) {
       playlists.unshift({
         id: liked,
@@ -133,19 +197,18 @@ export async function listMyPlaylists(
 }
 
 export async function fetchPlaylistSummary(
-  auth: GoogleOAuth2Client | string,
+  auth: YouTubeAuth,
   playlistId: string,
   skip = 0,
 ): Promise<PlaylistSummary> {
-  const youtube = google.youtube({ version: "v3", auth });
-
   let title: string | null = null;
   try {
-    const meta = await youtube.playlists.list({
-      part: ["snippet"],
-      id: [playlistId],
-    });
-    title = meta.data.items?.[0]?.snippet?.title ?? null;
+    const meta = await yt<Page<{ snippet?: { title?: string } }>>(
+      "playlists",
+      { part: "snippet", id: playlistId, fields: "items/snippet/title" },
+      auth,
+    );
+    title = meta.items?.[0]?.snippet?.title ?? null;
   } catch {
     // Metadata is a nicety; a failure here shouldn't sink the duration.
   }
@@ -153,19 +216,26 @@ export async function fetchPlaylistSummary(
   const videoIds: string[] = [];
   let pageToken: string | undefined;
   do {
-    const response = await youtube.playlistItems.list({
-      part: ["contentDetails"],
-      playlistId,
-      maxResults: 50,
-      pageToken,
-    });
+    const response = await yt<
+      Page<{ contentDetails?: { videoId?: string } }>
+    >(
+      "playlistItems",
+      {
+        part: "contentDetails",
+        playlistId,
+        maxResults: 50,
+        pageToken,
+        fields: "nextPageToken,items/contentDetails/videoId",
+      },
+      auth,
+    );
 
-    for (const item of response.data.items ?? []) {
+    for (const item of response.items ?? []) {
       const id = item.contentDetails?.videoId;
       if (id) videoIds.push(id);
     }
 
-    pageToken = response.data.nextPageToken ?? undefined;
+    pageToken = response.nextPageToken ?? undefined;
   } while (pageToken);
 
   const selected = skip > 0 ? videoIds.slice(skip) : videoIds;
@@ -177,12 +247,23 @@ export async function fetchPlaylistSummary(
 
   for (let i = 0; i < selected.length; i += 50) {
     const chunk = selected.slice(i, i + 50);
-    const response = await youtube.videos.list({
-      part: ["contentDetails", "snippet"],
-      id: chunk,
-    });
+    const response = await yt<
+      Page<{
+        id?: string;
+        contentDetails?: { duration?: string };
+        snippet?: { title?: string };
+      }>
+    >(
+      "videos",
+      {
+        part: "contentDetails,snippet",
+        id: chunk.join(","),
+        fields: "items(id,contentDetails/duration,snippet/title)",
+      },
+      auth,
+    );
 
-    for (const item of response.data.items ?? []) {
+    for (const item of response.items ?? []) {
       const seconds = parseDuration(item.contentDetails?.duration ?? "");
       totalSeconds += seconds;
       countedCount += 1;

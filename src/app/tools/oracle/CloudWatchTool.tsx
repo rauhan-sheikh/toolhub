@@ -96,7 +96,7 @@ export function CloudWatchTool() {
       {s.freeTier.length > 0 && (
         <Panel
           title="Always Free headroom"
-          note="Cost stays at zero right up until an allowance is crossed. Projection extrapolates this month's rate to month end."
+          note="Cost stays at zero right up until an allowance is crossed. Projection carries the latest daily rate to month end. Compute and memory accrue for every hour the VM is on: a 2 OCPU / 12 GB instance lands at ~96–99% each month, idle or not, and still costs nothing."
         >
           <div className="space-y-4">
             {s.freeTier.map((row) => (
@@ -162,7 +162,7 @@ export function CloudWatchTool() {
 
       <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-[var(--muted)]">
         <span>
-          Fetched {new Date(s.fetchedAt).toLocaleTimeString()} · cached 5 min
+          Fetched {new Date(s.fetchedAt).toLocaleTimeString()} · cached 30 min
         </span>
         <button
           onClick={refresh}
@@ -179,7 +179,9 @@ export function CloudWatchTool() {
 
 function Allowance({ row }: { row: OciSnapshot["freeTier"][number] }) {
   const danger = row.percentProjected >= 100;
-  const warn = !danger && row.percentProjected >= 80;
+  // A running instance projects to ~96–99% of its A1 allowance by design, so
+  // the early-warning band would sit amber all month on reserved rows.
+  const warn = !danger && !row.reserved && row.percentProjected >= 80;
   const bar = danger
     ? "bg-red-500"
     : warn
@@ -222,6 +224,12 @@ function Allowance({ row }: { row: OciSnapshot["freeTier"][number] }) {
           ? `On track to exceed the free allowance — projected ${fmt(row.projected)} ${row.unit} (${row.percentProjected.toFixed(0)}%). This will bill.`
           : `Projected ${fmt(row.projected)} ${row.unit} by month end (${row.percentProjected.toFixed(0)}%).`}
       </p>
+      {row.reserved && !danger && (
+        <p className="mt-0.5 text-xs text-[var(--muted)]">
+          Counted on what is allocated, not how busy it is &mdash; this grows
+          by the hour whether the app is used or idle.
+        </p>
+      )}
     </div>
   );
 }

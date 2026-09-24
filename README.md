@@ -6,7 +6,7 @@ self-hosted on an Oracle Cloud Ampere instance.
 | Tool | What it does |
 | --- | --- |
 | **Playlist Duration** | Total runtime of any YouTube playlist, **private ones included**, with playback-speed maths and a count of unavailable videos |
-| **Downloader** | A yt-dlp front end for video, audio, subtitles and thumbnails, with a live queue |
+| **Downloader** | A yt-dlp front end for video, audio, subtitles and thumbnails, with a live queue. Finished files stay on the server for 7 days |
 | **Cloud Watch** | Oracle tenancy spend, Always Free headroom with month-end projection, budget alerts and full resource inventory |
 
 ## Architecture
@@ -114,9 +114,9 @@ src/
 ├── proxy.ts              route gate (Next 16 renamed Middleware → Proxy)
 ├── lib/
 │   ├── session.ts        JWE cookie encrypt/decrypt
-│   ├── google.ts         OAuth client, scopes, token exchange
+│   ├── google.ts         OAuth over fetch: scopes, token exchange, access-token cache
 │   ├── api.ts            requireSession + error normalisation
-│   ├── youtube.ts        playlist stats (server-only; imports googleapis)
+│   ├── youtube.ts        playlist stats over the YouTube REST API (server-only)
 │   ├── metube.ts         download engine adapter
 │   ├── format.ts         pure formatters, safe for client components
 │   └── tools.ts          tool registry
@@ -127,6 +127,10 @@ src/
     └── tools/<slug>/
 ```
 
-`format.ts` is deliberately separate from `youtube.ts`: the latter imports
-googleapis, and pulling that into a client component would ship the whole SDK to
-the browser.
+`format.ts` is deliberately separate from `youtube.ts`: the latter is
+`server-only` and carries the user's access token, so client components import
+only its types.
+
+There is no Google SDK. `googleapis` eagerly loads ~300 API clients (≈200 MB)
+to make the four REST calls this app needs, so `google.ts` and `youtube.ts` use
+`fetch` directly and `jose` verifies the id_token.

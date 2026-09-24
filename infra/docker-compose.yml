@@ -6,11 +6,20 @@
 
 name: infra
 
+# Docker's default json-file driver never rotates. Caddy logs every request.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: "3"
+
 services:
   caddy:
     image: caddy:2-alpine
     container_name: caddy
     restart: unless-stopped
+    logging: *logging
+    mem_limit: 256m
     ports:
       - "80:80"
       - "443:443"
@@ -32,7 +41,7 @@ services:
       - edge
     healthcheck:
       test: ["CMD", "caddy", "version"]
-      interval: 30s
+      interval: 5m
       timeout: 5s
       retries: 3
 

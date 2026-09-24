@@ -29,7 +29,7 @@ type GoogleishError = {
   errors?: { reason?: string; message?: string }[];
 };
 
-/** Turns googleapis/network failures into something worth showing a user. */
+/** Turns Google API/network failures into something worth showing a user. */
 export function errorResponse(error: unknown): NextResponse {
   const err = (error ?? {}) as GoogleishError;
   const status = err.code ?? err.status ?? 500;

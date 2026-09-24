@@ -3,6 +3,13 @@ name: Build and deploy
 on:
   push:
     branches: [main]
+    # Nothing in these ends up in the image. infra/ is applied to the box by
+    # hand (see DEPLOY.md), so rebuilding and restarting the app for it — or
+    # for a docs edit — only churns the VPS.
+    paths-ignore:
+      - "**/*.md"
+      - "infra/**"
+      - ".env.example"
   workflow_dispatch:
 
 # A second push while a deploy is mid-flight would race it onto the box.
@@ -75,6 +82,9 @@ jobs:
             set -euo pipefail
             echo "$GHCR_TOKEN" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
             cd ~/toolhub
+            # The image carries the code, but docker-compose.yml lives in this
+            # checkout; without a pull, compose changes never reach the box.
+            if [ -d .git ]; then git pull --ff-only; fi
             docker compose pull web
             docker compose up -d
             docker logout ghcr.io
@@ -90,7 +100,7 @@ jobs:
           script: |
             set -euo pipefail
             for i in $(seq 1 20); do
-              if docker exec toolhub-web node -e "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"; then
+              if docker exec toolhub-web wget -q -O /dev/null http://127.0.0.1:3000/api/health; then
                 echo "healthy after ${i} attempt(s)"
                 exit 0
               fi

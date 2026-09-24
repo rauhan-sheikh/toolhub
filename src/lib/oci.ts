@@ -21,7 +21,10 @@ export type ServiceCost = { service: string; cost: number };
 export type UsageLine = {
   service: string;
   sku: string;
+  /** Month to date. */
   quantity: number;
+  /** Month-end estimate from the latest complete day's rate. */
+  projected: number;
   unit: string;
 };
 
@@ -34,12 +37,17 @@ export type ResourceRow = {
 export type FreeTierRow = {
   label: string;
   used: number;
-  /** Linear extrapolation of the month-to-date rate to month end. */
+  /** Month-to-date plus the latest daily rate carried to month end. */
   projected: number;
   limit: number;
   unit: string;
   percentUsed: number;
   percentProjected: number;
+  /**
+   * Metered on what is allocated, not what is used: an instance accrues its
+   * full shape every hour it is powered on, busy or idle.
+   */
+  reserved: boolean;
 };
 
 export type BudgetRow = {
@@ -195,41 +203,96 @@ async function fetchForecast(
   }
 }
 
+const DAY_MS = 86_400_000;
+
+/**
+ * Daily rather than monthly, so the projection can use the current run rate.
+ * Extrapolating the month-to-date average instead under-projects anything
+ * created mid-month, and Oracle's reporting lag drags the average down too.
+ */
 async function fetchUsage(
   client: usageapi.UsageapiClient,
   tenant: string,
   start: Date,
   end: Date,
 ): Promise<UsageLine[]> {
-  const response = await client.requestSummarizedUsages({
-    requestSummarizedUsagesDetails: {
-      tenantId: tenant,
-      timeUsageStarted: start,
-      timeUsageEnded: end,
-      granularity:
-        usageapi.models.RequestSummarizedUsagesDetails.Granularity.Monthly,
-      queryType:
-        usageapi.models.RequestSummarizedUsagesDetails.QueryType.UsageOnly,
-      isAggregateByTime: true,
-      groupBy: ["service", "skuName", "unit"],
-    },
-  });
+  // A row per SKU per day adds up fast, so follow the pages rather than
+  // silently under-counting a busy month.
+  const items: usageapi.models.UsageSummary[] = [];
+  let page: string | undefined;
+  do {
+    const response = await client.requestSummarizedUsages({
+      requestSummarizedUsagesDetails: {
+        tenantId: tenant,
+        timeUsageStarted: start,
+        timeUsageEnded: end,
+        granularity:
+          usageapi.models.RequestSummarizedUsagesDetails.Granularity.Daily,
+        queryType:
+          usageapi.models.RequestSummarizedUsagesDetails.QueryType.UsageOnly,
+        isAggregateByTime: false,
+        groupBy: ["service", "skuName", "unit"],
+      },
+      page,
+    });
+    items.push(...(response.usageAggregation?.items ?? []));
+    page = response.opcNextPage || undefined;
+  } while (page);
 
-  const lines = new Map<string, UsageLine>();
-  for (const item of response.usageAggregation?.items ?? []) {
+  const lines = new Map<
+    string,
+    { service: string; sku: string; unit: string; byDay: Map<number, number> }
+  >();
+  const reportedDays = new Set<number>();
+  const today = Math.floor(Date.now() / DAY_MS);
+
+  for (const item of items) {
     if (item.isForecast) continue;
+    const quantity = item.computedQuantity ?? 0;
+    if (quantity <= 0) continue;
+
     const service = item.service ?? "Unknown";
     const sku = item.skuName ?? "—";
     const unit = item.unit ?? "";
     const key = `${service}|${sku}|${unit}`;
-    const existing = lines.get(key);
-    const quantity = item.computedQuantity ?? 0;
-    if (existing) existing.quantity += quantity;
-    else lines.set(key, { service, sku, quantity, unit });
+    const day = Math.floor(new Date(item.timeUsageStarted).getTime() / DAY_MS);
+
+    let line = lines.get(key);
+    if (!line) {
+      line = { service, sku, unit, byDay: new Map() };
+      lines.set(key, line);
+    }
+    line.byDay.set(day, (line.byDay.get(day) ?? 0) + quantity);
+    if (day < today) reportedDays.add(day);
   }
 
+  // The rate comes from the last two days Oracle has reported before today.
+  // Two, because the newest is often still partially ingested; taking the
+  // larger errs towards warning early. That newest day is itself priced at
+  // the rate, so its partial figure never drags the projection down.
+  const rateDays = [...reportedDays].sort((a, b) => b - a).slice(0, 2);
+  const anchor = rateDays[0];
+  const lastDay = Math.floor(end.getTime() / DAY_MS) - 1;
+  const daysAtRate = anchor === undefined ? 0 : Math.max(0, lastDay - anchor + 1);
+
   return [...lines.values()]
-    .filter((line) => line.quantity > 0)
+    .map(({ service, sku, unit, byDay }) => {
+      let quantity = 0;
+      let beforeAnchor = 0;
+      for (const [day, value] of byDay) {
+        quantity += value;
+        if (anchor !== undefined && day < anchor) beforeAnchor += value;
+      }
+      const rate = Math.max(0, ...rateDays.map((day) => byDay.get(day) ?? 0));
+      return {
+        service,
+        sku,
+        unit,
+        quantity,
+        projected:
+          anchor === undefined ? quantity : beforeAnchor + rate * daysAtRate,
+      };
+    })
     .sort(
       (a, b) =>
         a.service.localeCompare(b.service) || a.sku.localeCompare(b.sku),
@@ -291,54 +354,55 @@ const FREE_TIER: {
   label: string;
   limit: number;
   unit: string;
+  reserved: boolean;
   match: (line: UsageLine) => boolean;
 }[] = [
   {
     label: "Ampere A1 compute",
     limit: 1500,
     unit: "OCPU-hours",
+    reserved: true,
     match: (l) => l.service === "Compute" && /OCPU Per Hour/i.test(l.unit),
   },
   {
     label: "Ampere A1 memory",
     limit: 9000,
     unit: "GB-hours",
+    reserved: true,
     match: (l) => l.service === "Compute" && /Gigabyte Per Hour/i.test(l.unit),
   },
   {
     label: "Block storage",
     limit: 200,
     unit: "GB",
-    match: (l) => l.service === "Block Storage",
+    reserved: true,
+    // Capacity only. Performance units (VPUs) and backups are metered under
+    // the same service in other units; adding them to GB is meaningless.
+    match: (l) =>
+      l.service === "Block Storage" &&
+      !/Performance|Backup/i.test(`${l.sku} ${l.unit}`),
   },
   {
     label: "Outbound transfer",
     limit: 10240,
     unit: "GB",
+    reserved: false,
     match: (l) => /Outbound Data Transfer/i.test(l.sku),
   },
 ];
 
-function computeFreeTier(usage: UsageLine[], start: Date): FreeTierRow[] {
-  const monthEnd = new Date(
-    Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + 1, 1),
-  );
-  const elapsed = Date.now() - start.getTime();
-  const whole = monthEnd.getTime() - start.getTime();
-  // Guard the first moments of a month, where the ratio explodes.
-  const ratio = elapsed > 3600_000 ? whole / elapsed : 1;
-
-  return FREE_TIER.map(({ label, limit, unit, match }) => {
-    const used = usage
-      .filter(match)
-      .reduce((sum, line) => sum + line.quantity, 0);
-    const projected = used * ratio;
+function computeFreeTier(usage: UsageLine[]): FreeTierRow[] {
+  return FREE_TIER.map(({ label, limit, unit, reserved, match }) => {
+    const lines = usage.filter(match);
+    const used = lines.reduce((sum, line) => sum + line.quantity, 0);
+    const projected = lines.reduce((sum, line) => sum + line.projected, 0);
     return {
       label,
       used,
       projected,
       limit,
       unit,
+      reserved,
       percentUsed: (used / limit) * 100,
       percentProjected: (projected / limit) * 100,
     };
@@ -346,7 +410,8 @@ function computeFreeTier(usage: UsageLine[], start: Date): FreeTierRow[] {
 }
 
 let cache: { at: number; snapshot: OciSnapshot } | null = null;
-const CACHE_MS = 5 * 60 * 1000;
+// Oracle refreshes usage data a few times a day; the Refresh button bypasses this.
+const CACHE_MS = 30 * 60 * 1000;
 
 export async function getSnapshot(force = false): Promise<OciSnapshot> {
   if (!force && cache && Date.now() - cache.at < CACHE_MS) {
@@ -364,9 +429,8 @@ export async function getSnapshot(force = false): Promise<OciSnapshot> {
 
   // Cost is the headline number, so a failure there is fatal; the rest degrade
   // to warnings so one missing IAM policy doesn't blank the whole page.
-  const cost = await fetchCost(usageClient, tenant, start, end);
-
-  const [forecastCost, usage, resources, budgetRows] = await Promise.all([
+  const [cost, forecastCost, usage, resources, budgetRows] = await Promise.all([
+    fetchCost(usageClient, tenant, start, end),
     fetchForecast(usageClient, tenant, start, end),
     fetchUsage(usageClient, tenant, start, end).catch((error: unknown) => {
       warnings.push(`Usage quantities unavailable: ${describe(error)}`);
@@ -389,7 +453,7 @@ export async function getSnapshot(force = false): Promise<OciSnapshot> {
     byService: cost.byService,
     usage,
     resources,
-    freeTier: computeFreeTier(usage, start),
+    freeTier: computeFreeTier(usage),
     budgets: budgetRows,
     periodStart: start.toISOString(),
     periodEnd: end.toISOString(),

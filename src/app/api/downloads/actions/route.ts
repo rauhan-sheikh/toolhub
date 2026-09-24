@@ -35,9 +35,11 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: true });
     }
 
-    // Removes the entry AND the file. MeTube's own delete only clears the
-    // list unless DELETE_FILE_ON_TRASHCAN is on, which would make every
-    // removal destructive; doing it here keeps the choice per-item.
+    // Removes the entry AND the file — the only way the UI removes a
+    // finished download, so nothing is left on disk with no way back to it.
+    // MeTube's own delete only clears the list unless DELETE_FILE_ON_TRASHCAN
+    // is on, which would also make cancelling a queued item destructive.
+    // A file that's already gone still lets the entry go.
     if (action === "deleteFile") {
       const id = String(body?.id ?? "");
       const filename = String(body?.filename ?? "");

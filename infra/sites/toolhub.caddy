@@ -5,4 +5,12 @@ tools.rauhansheikh.com {
 	# containers sit on the shared `edge` network, so Docker's DNS resolves it
 	# and the app never needs to publish a port to the host.
 	reverse_proxy toolhub-web:3000
+
+	# The downloader polls this while its tab is open; a log line per poll
+	# drowns out everything worth reading.
+	@poll {
+		method GET
+		path /api/downloads
+	}
+	log_skip @poll
 }

@@ -305,6 +305,18 @@ images are also tagged by commit SHA:
 TOOLHUB_IMAGE=ghcr.io/rauhan-sheikh/toolhub:<sha> docker compose up -d web
 ```
 
+The deploy runs `git pull --ff-only` in `~/toolhub` before restarting, so
+`docker-compose.yml` changes land with the image. Keep that checkout clean —
+local edits to tracked files make the pull, and so the deploy, fail. Pushes that
+only touch docs or `infra/` skip the build entirely; `infra/` is applied by hand:
+
+```bash
+cp -rT ~/toolhub/infra ~/infra && cd ~/infra
+docker compose exec caddy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+docker compose up -d      # picks up compose changes; restarts caddy only if needed
+docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile
+```
+
 ## 10. Cloud Watch (Oracle billing monitor)
 
 Reads tenancy-wide cost, Always Free headroom, budgets and every resource that
@@ -368,6 +380,11 @@ lands in `~/toolhub/downloads`.
 
 If a download fails with *"Sign in to confirm you're not a bot"*, WARP isn't
 routing — `docker compose restart warp metube`.
+
+Finished downloads are deleted after **7 days** — file and list entry — by a
+sweep the web container runs at start-up and every 6 hours
+(`RETENTION_DAYS` in `src/lib/metube.ts`). Files MeTube no longer lists go by
+their creation time on disk.
 
 ---
 

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { errorResponse, requireSession } from "@/lib/api";
 import { optionalEnv } from "@/lib/env";
-import { authedClient } from "@/lib/google";
+import { accessToken } from "@/lib/google";
 import { fetchPlaylistSummary, resolvePlaylistId } from "@/lib/youtube";
 
 export async function POST(req: Request) {
@@ -12,6 +12,7 @@ export async function POST(req: Request) {
     const body = await req.json();
     const playlistId = resolvePlaylistId(String(body?.playlistId ?? ""));
     const skip = Number(body?.skip ?? 0);
+    const safeSkip = Number.isFinite(skip) && skip > 0 ? skip : 0;
 
     if (!playlistId) {
       return NextResponse.json(
@@ -27,13 +28,13 @@ export async function POST(req: Request) {
     let summary;
     try {
       summary = await fetchPlaylistSummary(
-        authedClient(auth.session.refreshToken),
+        { accessToken: await accessToken(auth.session.refreshToken) },
         playlistId,
-        Number.isFinite(skip) && skip > 0 ? skip : 0,
+        safeSkip,
       );
     } catch (oauthError) {
       if (!apiKey) throw oauthError;
-      summary = await fetchPlaylistSummary(apiKey, playlistId, skip);
+      summary = await fetchPlaylistSummary({ apiKey }, playlistId, safeSkip);
     }
 
     return NextResponse.json(summary);

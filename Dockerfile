@@ -19,6 +19,9 @@ ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
+# Caps the V8 heap well under the container's mem_limit. Without it V8 sizes
+# the heap from the host's 12 GB and collects lazily, so RSS drifts upwards.
+ENV NODE_OPTIONS=--max-old-space-size=256
 
 RUN addgroup -g 1001 -S nodejs && adduser -S nextjs -u 1001
 
@@ -31,7 +34,10 @@ COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 USER nextjs
 EXPOSE 3000
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-  CMD node -e "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+# Informational only: `restart: unless-stopped` acts on exits, not on health.
+# busybox wget rather than `node -e`, which started a whole Node process (~40
+# MB) every 30 s. Frequent checks only while starting, then every 5 minutes.
+HEALTHCHECK --interval=5m --timeout=5s --start-period=30s --start-interval=2s --retries=3 \
+  CMD wget -q -O /dev/null http://127.0.0.1:3000/api/health || exit 1
 
 CMD ["node", "server.js"]

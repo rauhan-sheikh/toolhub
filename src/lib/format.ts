@@ -1,8 +1,8 @@
 /**
  * Pure formatting helpers, safe to import from Client Components.
  *
- * Kept apart from `@/lib/youtube` deliberately: that module imports googleapis,
- * and importing it client-side would pull the whole SDK into the browser bundle.
+ * Kept apart from `@/lib/youtube` deliberately: that module is server-only and
+ * handles the user's access token, so client code may import only its types.
  */
 
 /** `3:07:12`, or `12:04` when under an hour. */

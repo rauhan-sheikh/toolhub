@@ -26,11 +26,18 @@ const AUDIO_FORMATS = [
   { value: "flac", label: "FLAC" },
 ];
 
-const ACTIVE_POLL_MS = 1_500;
-const IDLE_POLL_MS = 10_000;
+const ACTIVE_POLL_MS = 2_000;
+const IDLE_POLL_MS = 30_000;
 
 function isActive(item: DownloadItem): boolean {
   return item.group !== "done";
+}
+
+/** What a poll can change on screen; equal signatures mean nothing moved. */
+function signature(items: DownloadItem[]): string {
+  return items
+    .map((item) => `${item.id}:${item.status}:${item.percent ?? ""}`)
+    .join("|");
 }
 
 export function DownloaderTool() {
@@ -78,19 +85,51 @@ export function DownloaderTool() {
   }, []);
 
   useEffect(() => {
-    let cancelled = false;
+    // Bumped whenever the loop restarts, so a poll still in flight from the
+    // previous run can't schedule a second, parallel loop.
+    let generation = 0;
+    let delay = ACTIVE_POLL_MS;
+    let last = "";
 
-    const tick = async () => {
-      const next = await refresh();
-      if (cancelled) return;
-      const delay = next.some(isActive) ? ACTIVE_POLL_MS : IDLE_POLL_MS;
-      timer.current = setTimeout(tick, delay);
+    const stop = () => {
+      generation += 1;
+      if (timer.current) clearTimeout(timer.current);
+      timer.current = null;
     };
 
-    tick();
+    const tick = async (run: number) => {
+      const next = await refresh();
+      // Opened straight into a background tab: show the first result, then
+      // wait for visibilitychange.
+      if (run !== generation || document.hidden) return;
+
+      const current = signature(next);
+      if (!next.some(isActive)) {
+        delay = IDLE_POLL_MS;
+      } else if (current === last) {
+        // Active but unchanged, probably stuck: back off towards idle.
+        delay = Math.min(delay * 2, IDLE_POLL_MS);
+      } else {
+        delay = ACTIVE_POLL_MS;
+      }
+      last = current;
+      timer.current = setTimeout(() => tick(run), delay);
+    };
+
+    // Polls only while the tab is visible; nobody is watching a progress bar
+    // in a background tab, and it would otherwise poll for as long as it's open.
+    const start = () => {
+      stop();
+      delay = ACTIVE_POLL_MS;
+      tick(generation);
+    };
+    const onVisibility = () => (document.hidden ? stop() : start());
+
+    document.addEventListener("visibilitychange", onVisibility);
+    start();
     return () => {
-      cancelled = true;
-      if (timer.current) clearTimeout(timer.current);
+      document.removeEventListener("visibilitychange", onVisibility);
+      stop();
     };
   }, [refresh]);
 
@@ -278,6 +317,7 @@ function DownloadRow({
 }) {
   const done = item.group === "done";
   const failed = item.status === "error";
+  const hasFile = done && !failed && Boolean(item.filename);
   const percent = Math.max(0, Math.min(100, item.percent ?? 0));
 
   return (
@@ -294,7 +334,7 @@ function DownloadRow({
             {failed
               ? (item.error ?? item.msg ?? "Failed")
               : done
-                ? `Finished · ${formatBytes(item.size)} · saved on the server`
+                ? `Finished · ${formatBytes(item.size)} · ${expiry(item.expiresAt)}`
                 : [
                     item.status,
                     item.speed ? `${formatBytes(item.speed)}/s` : null,
@@ -306,9 +346,9 @@ function DownloadRow({
         </div>
 
         <div className="flex shrink-0 flex-wrap items-center gap-2 min-[420px]:justify-end">
-          {done && !failed && item.filename && (
+          {hasFile && (
             <a
-              href={`/api/downloads/file?name=${encodeURIComponent(item.filename)}`}
+              href={`/api/downloads/file?name=${encodeURIComponent(item.filename ?? "")}`}
               download
               title="Save this file to your device"
               className="rounded-lg accent-bg px-2.5 py-1.5 text-xs font-semibold text-white transition hover:opacity-90"
@@ -326,25 +366,27 @@ function DownloadRow({
             </button>
           )}
 
-          <button
-            onClick={() =>
-              onAct({
-                action: "delete",
-                ids: [item.id],
-                where: done ? "done" : "queue",
-              })
-            }
-            title={
-              done
-                ? "Remove this entry from the list. The file stays on the server."
-                : "Stop this download and remove it from the queue."
-            }
-            className="rounded-lg border border-[var(--border)] px-2.5 py-1.5 text-xs text-[var(--muted)] transition hover:border-white/25 hover:text-[var(--foreground)]"
-          >
-            {done ? "Remove from list" : "Cancel"}
-          </button>
+          {!hasFile && (
+            <button
+              onClick={() =>
+                onAct({
+                  action: "delete",
+                  ids: [item.id],
+                  where: done ? "done" : "queue",
+                })
+              }
+              title={
+                done
+                  ? "Remove this entry from the list."
+                  : "Stop this download and remove it from the queue."
+              }
+              className="rounded-lg border border-[var(--border)] px-2.5 py-1.5 text-xs text-[var(--muted)] transition hover:border-white/25 hover:text-[var(--foreground)]"
+            >
+              {done ? "Remove" : "Cancel"}
+            </button>
+          )}
 
-          {done && item.filename && (
+          {hasFile && (
             <button
               onClick={() => {
                 if (
@@ -359,10 +401,10 @@ function DownloadRow({
                   });
                 }
               }}
-              title="Delete the file from the server's disk as well as the list"
+              title="Delete the file from the server and remove it from the list"
               className="rounded-lg border border-red-500/30 px-2.5 py-1.5 text-xs text-red-300 transition hover:border-red-500/60 hover:bg-red-500/10"
             >
-              Delete file
+              Delete
             </button>
           )}
         </div>
@@ -378,6 +420,14 @@ function DownloadRow({
       )}
     </li>
   );
+}
+
+/** "deleted from the server in 3 days", from the retention deadline. */
+function expiry(expiresAt: number | null): string {
+  if (expiresAt === null) return "saved on the server";
+  const days = Math.ceil((expiresAt - Date.now()) / 86_400_000);
+  if (days <= 0) return "deleted from the server soon";
+  return `deleted from the server in ${days} day${days === 1 ? "" : "s"}`;
 }
 
 function Segmented<T extends string>({

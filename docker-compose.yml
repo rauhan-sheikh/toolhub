@@ -9,6 +9,14 @@
 
 name: toolhub
 
+# Docker's default json-file driver never rotates, so every container's log
+# grows until the disk fills. Three 10 MB files each is plenty to debug with.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: "3"
+
 services:
   web:
     # CI builds this and pushes it to GHCR; the VPS only ever pulls, so deploys
@@ -20,6 +28,10 @@ services:
     # `web` would collide with the next project that has a `web` service.
     container_name: toolhub-web
     restart: unless-stopped
+    logging: *logging
+    # Ceilings against a runaway, not tuning — the app idles well under these.
+    # The Dockerfile caps the V8 heap to match.
+    mem_limit: 512m
     env_file: .env
     volumes:
       # Finished downloads. The app streams these to the browser and deletes
@@ -36,6 +48,9 @@ services:
     image: ghcr.io/alexta69/metube:latest
     container_name: toolhub-metube
     restart: unless-stopped
+    logging: *logging
+    # ffmpeg merges are the heaviest thing on the box; leave room for them.
+    mem_limit: 2g
     volumes:
       - ./downloads:/downloads
       - metube-state:/state
@@ -49,6 +64,10 @@ services:
       PUID: ${PUID:-1000}
       PGID: ${PGID:-1000}
       STATE_DIR: /state
+      # Each download is yt-dlp plus an ffmpeg merge; the default of 3 at once
+      # contends for the box's 2 OCPUs.
+      MAX_CONCURRENT_DOWNLOADS: 2
+      LOGLEVEL: WARNING
       # Route yt-dlp's traffic through Cloudflare WARP. YouTube blocks requests
       # straight from cloud IP ranges (Oracle included) with "Sign in to confirm
       # you're not a bot"; WARP egress is not treated that way.
@@ -63,6 +82,8 @@ services:
     image: caomingjun/warp
     container_name: toolhub-warp
     restart: unless-stopped
+    logging: *logging
+    mem_limit: 384m
     environment:
       WARP_SLEEP: 2
     # Required for the WireGuard tunnel the container brings up internally.
@@ -77,12 +98,15 @@ services:
       net.ipv4.conf.all.src_valid_mark: 1
     volumes:
       - warp-data:/var/lib/cloudflare-warp
+    # Gates metube's start (service_healthy), so it checks every 5 s while
+    # starting; after that it's informational and every 5 min is enough.
     healthcheck:
       test: ["CMD", "sh", "-c", "curl -fs https://www.cloudflare.com/cdn-cgi/trace | grep -q 'warp=on'"]
-      interval: 30s
+      interval: 5m
       timeout: 10s
-      start_period: 30s
-      retries: 5
+      start_period: 60s
+      start_interval: 5s
+      retries: 3
     networks:
       - backend
 
